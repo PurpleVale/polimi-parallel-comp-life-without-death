@@ -6,7 +6,6 @@
 #include <string>
 #include <cstdint>
 #include <fstream>
-#include <iostream>
 #include <omp.h>
 
 #define MAX_STEPS 1000000
@@ -106,7 +105,7 @@ void initialize_grid(Grid &g) {
     for (int dx = -r; dx <= r; dx++) {
       for (int dy = -r; dy <= r; dy++) {
         if (dy*dy + dx*dx <= r*r) {
-          int x = (gx + dx) % W, y = (gy + dy) % H;
+          int x = (gx + dx + 2*W) % W, y = (gy + dy + 2*H) % H;
           if (((float)rand()/RAND_MAX) < CLUSTER_FILL_DENSITY) {
             int idx = y*W + x;
             g.alive[idx] = 1;
@@ -249,7 +248,6 @@ int main(int argc, char **argv) {
     int H = atoi(argv[2]);
     int seed = atoi(argv[3]);
     srand(seed);
-
 
     Grid gs(W,H), gp(W,H);
     initialize_grid(gs);

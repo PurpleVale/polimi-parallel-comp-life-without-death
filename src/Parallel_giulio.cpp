@@ -1,5 +1,3 @@
-%%writefile life_wout_death.cpp
-
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>

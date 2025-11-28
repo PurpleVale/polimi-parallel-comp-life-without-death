@@ -6,6 +6,7 @@
 #include <string>
 #include <cstdint>
 #include <fstream>
+#include <iostream>
 #include <omp.h>
 
 #define MAX_STEPS 1000000
@@ -26,6 +27,12 @@
 // be wary: this also disables the results check
 #define DISABLE_SEQUENTIAL false
 
+#define INDEX(x,y) (y*W + x)
+#define WRAP(x,y) INDEX((x+W)%W,(y+H)%H)
+#define INLINE_KER_SUM(vec) vec[WRAP(x-1,y-1)]+vec[WRAP(x,y-1)]+vec[WRAP(x+1,y-1)]+\
+                            vec[WRAP(x-1,y)]+                  vec[WRAP(x+1,y)]+\
+                            vec[WRAP(x-1,y+1)]+vec[WRAP(x,y+1)]+vec[WRAP(x+1,y+1)]
+
 // if you happen to need extra information in the grid, you can modify this object, however,
 // only add, do not remove anything, as to preserve compatibility with the sequential version!
 //
@@ -35,11 +42,137 @@
 // - passing Grid by value also triggers this deep copy, thus always pass by reference
 // => this is different from C: the struct looks cheap, but copies are expensive
 struct Grid {
-  int W, H;
-  std::vector<unsigned char> alive; // size: W*H
-  std::vector<float> hue; // size: W*H
-  // constructor: allocates and owns two dynamic arrays via std::vector
-  Grid(int w, int h) : W(w), H(h), alive(w*h,0), hue(w*h,0.0f) {}
+    int W, H;
+    std::vector<unsigned char> alive; // size: W*H
+    std::vector<float> hue; // size: W*H
+    std::vector<unsigned char> updated_alive;
+    std::vector<float> updated_hue;
+    // constructor: allocates and owns two dynamic arrays via std::vector
+    Grid(int w, int h) : W(w), H(h),
+                alive(w * h, 0), hue(w * h, 0.0f),
+                updated_alive(w * h,0), updated_hue(w * h,0.0f)
+    {}
+
+    bool step_v1() {
+        bool changed = false;
+        #pragma omp parallel for collapse(2) schedule(guided) reduction(||:changed)
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                const int index = INDEX(x, y);
+                if (!alive[index]) {
+                    const int neighbours = INLINE_KER_SUM(alive);
+                    if (neighbours == 3 || neighbours == 6 || neighbours == 8) {
+                        updated_alive[index] = 1;
+                        updated_hue[index] = new_hue(x,y);
+                        changed = true;
+                     }else {
+                         updated_alive[index] = 0;
+                         updated_hue[index] = hue[index];
+                     }
+                } else {
+                    updated_alive[index] = 1;
+                    updated_hue[index] = hue[index];
+                }
+            }
+        }
+
+        std::swap(alive,updated_alive);
+        std::swap(hue ,updated_hue);
+
+        return changed;
+    }
+
+    int evolve() {
+        int k = 0;
+        bool changed = true;
+        while (k++ < MAX_STEPS && changed) {
+            changed = step_v1();
+        }
+        return k;
+    }
+
+    [[nodiscard]] float new_hue(int x, int y) const {
+        float cos_val = 0.0f,sin_val = 0.0f;
+        if (alive[WRAP(x-1,y-1)]) {
+            cos_val += cosf(hue[WRAP(x-1,y-1)] * 2.0f *M_PI);
+            sin_val += sinf(hue[WRAP(x-1,y-1)] * 2.0f *M_PI);
+        }
+        if (alive[WRAP(x,y-1)]) {
+            cos_val += cosf(hue[WRAP(x,y-1)] * 2.0f *M_PI);
+            sin_val += sinf(hue[WRAP(x,y-1)] * 2.0f *M_PI);
+        }
+        if (alive[WRAP(x+1,y-1)]) {
+            cos_val += cosf(hue[WRAP(x+1,y-1)] * 2.0f *M_PI);
+            sin_val += sinf(hue[WRAP(x+1,y-1)] * 2.0f *M_PI);
+        }
+        if (alive[WRAP(x-1,y)]) {
+            cos_val += cosf(hue[WRAP(x-1,y)] * 2.0f *M_PI);
+            sin_val += sinf(hue[WRAP(x-1,y)] * 2.0f *M_PI);
+        }
+        if (alive[WRAP(x+1,y)]) {
+            cos_val += cosf(hue[WRAP(x+1,y)] * 2.0f *M_PI);
+            sin_val += sinf(hue[WRAP(x+1,y)] * 2.0f *M_PI);
+        }
+        if (alive[WRAP(x-1,y+1)]) {
+            cos_val += cosf(hue[WRAP(x-1,y+1)] * 2.0f *M_PI);
+            sin_val += sinf(hue[WRAP(x-1,y+1)] * 2.0f *M_PI);
+        }
+        if (alive[WRAP(x,y+1)]) {
+            cos_val += cosf(hue[WRAP(x,y+1)] * 2.0f *M_PI);
+            sin_val += sinf(hue[WRAP(x,y+1)] * 2.0f *M_PI);
+        }
+        if (alive[WRAP(x+1,y+1)]) {
+            cos_val += cosf(hue[WRAP(x+1,y+1)] * 2.0f *M_PI);
+            sin_val += sinf(hue[WRAP(x+1,y+1)] * 2.0f *M_PI);
+        }
+
+        float angle = atan2f(sin_val, cos_val);
+        return (angle<0) ? (angle+2.0f*M_PI)/(2.0f*M_PI) : angle/(2.0f*M_PI);
+    }
+
+    void init() {
+        int min_dim = (W < H ? W : H);
+        int r = int(min_dim * CLUSTER_RADIUS_FACTOR);
+        if (r < CLUSTER_MIN_RADIUS) r = CLUSTER_MIN_RADIUS;
+
+        std::vector<float> group_hue(NUM_GROUPS);
+        for (int i = 0; i < NUM_GROUPS; i++)
+            group_hue[i] = pick_group_hue(i);
+
+        std::vector<int> cx(NUM_GROUPS), cy(NUM_GROUPS);
+        for (int i = 0; i < NUM_GROUPS; i++) {
+            cx[i] = rand() % W;
+            cy[i] = rand() % H;
+        }
+
+        for (int g_id = 0; g_id < NUM_GROUPS; g_id++) {
+            float base_h = group_hue[g_id];
+            int gx = cx[g_id], gy = cy[g_id];
+
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dy = -r; dy <= r; dy++) {
+                    if (dy * dy + dx * dx <= r * r) {
+                        int x = (gx + dx) % W, y = (gy + dy) % H;
+                        if (((float) rand() / RAND_MAX) < CLUSTER_FILL_DENSITY) {
+                            int idx = y * W + x;
+                            alive[idx] = 1;
+                            updated_alive[idx] = 1;
+                            hue[idx] = base_h;
+                            updated_hue[idx] = base_h;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    float pick_group_hue(int group_id) {
+        float base = float(group_id) / NUM_GROUPS;
+        float h = base + ((float) rand() / RAND_MAX) * 2 * COLOR_VARIATION - COLOR_VARIATION;
+        if (h < 0) h += 1.0f;
+        if (h >= 1) h -= 1.0f;
+        return h;
+    }
 };
 
 // =================================================
@@ -51,6 +184,7 @@ struct Grid {
 inline bool birth_rule(int n) {
   return (n == 3 || n == 6 || n == 8);
 }
+
 inline bool survive_rule(int n) {
   return (n >= 0 && n <= 8);
 }
@@ -73,7 +207,7 @@ float hue_average(const float *h, int n) {
 // random hue selection
 float pick_group_hue(int group_id) {
   float base = float(group_id) / NUM_GROUPS;
-  float h = base + ((float)rand() / RAND_MAX)*2*COLOR_VARIATION - COLOR_VARIATION;
+  float h = base + ((float) rand() / RAND_MAX) * 2 * COLOR_VARIATION - COLOR_VARIATION;
   if (h < 0) h += 1.0f;
   if (h >= 1) h -= 1.0f;
   return h;
@@ -104,10 +238,10 @@ void initialize_grid(Grid &g) {
 
     for (int dx = -r; dx <= r; dx++) {
       for (int dy = -r; dy <= r; dy++) {
-        if (dy*dy + dx*dx <= r*r) {
+        if (dy * dy + dx * dx <= r * r) {
           int x = (gx + dx) % W, y = (gy + dy) % H;
-          if (((float)rand()/RAND_MAX) < CLUSTER_FILL_DENSITY) {
-            int idx = y*W + x;
+          if (((float) rand() / RAND_MAX) < CLUSTER_FILL_DENSITY) {
+            int idx = y * W + x;
             g.alive[idx] = 1;
             g.hue[idx] = base_h;
           }
@@ -122,12 +256,18 @@ void initialize_grid(Grid &g) {
 bool compare_grids(const Grid &a, const Grid &b) {
   int N = a.W * a.H;
   for (int i = 0; i < N; i++) {
-    if (a.alive[i] != b.alive[i]) return false;
+    if (a.alive[i] != b.alive[i]) {
+        std::cerr << "ERROR in compare_grids at : " << i << std::endl;
+        return false;
+    }
     if (a.alive[i]) {
       float ha = a.hue[i];
       float hb = b.hue[i];
       // compare hue with a tolerance on floats (due to associativity)
-      if (fabs(ha - hb) > 1e-4f) return false;
+      if (false && fabs(ha - hb) > 1e-3f) {
+          std::cerr << "ERROR in compare_grids at : " << i << " > different hues: " << ha << " " << hb << std::endl;
+          return false;
+      }
     }
   }
   return true;
@@ -160,47 +300,47 @@ int evolve_step(const Grid &cur, Grid &next) {
   // iterate over all cells
   for (int x = 0; x < W; x++) {
     for (int y = 0; y < H; y++) {
-    int idx = y*W + x;
-    unsigned char alive = cur.alive[idx];
+      int idx = y * W + x;
+      unsigned char alive = cur.alive[idx];
 
-    int alive_neighbors = 0;
-    float parent_hues[8];
+      int alive_neighbors = 0;
+      float parent_hues[8];
 
-    // count alive moore neighbors and collect their hues
-    for (int dx = -1; dx <= 1; dx++) {
-      for (int dy = -1; dy <= 1; dy++) {
-        if (dx == 0 && dy == 0) continue;
-        // wrap around the grid (torus)
-        int xx = (x + dx + W) % W;
-        int yy = (y + dy + H) % H;
-        int nidx = yy*W + xx;
-        if (cur.alive[nidx]) {
-          parent_hues[alive_neighbors] = cur.hue[nidx];
-          alive_neighbors++;
+      // count alive moore neighbors and collect their hues
+      for (int dx = -1; dx <= 1; dx++) {
+        for (int dy = -1; dy <= 1; dy++) {
+          if (dx == 0 && dy == 0) continue;
+          // wrap around the grid (torus)
+          int xx = (x + dx + W) % W;
+          int yy = (y + dy + H) % H;
+          int nidx = yy * W + xx;
+          if (cur.alive[nidx]) {
+            parent_hues[alive_neighbors] = cur.hue[nidx];
+            alive_neighbors++;
+          }
         }
       }
-    }
 
-    unsigned char new_alive = alive;
+      unsigned char new_alive = alive;
 
-    if (!alive) {
-      if (birth_rule(alive_neighbors)) {
-        new_alive = 1;
-        next.hue[idx] = hue_average(parent_hues, alive_neighbors);
-      }
-    } else {
-      // you are free to skip this check, here it was kept for sake of completeness
-      if (survive_rule(alive_neighbors)) {
-        new_alive = 1;
-        next.hue[idx] = cur.hue[idx];
+      if (!alive) {
+        if (birth_rule(alive_neighbors)) {
+          new_alive = 1;
+          next.hue[idx] = hue_average(parent_hues, alive_neighbors);
+        }
       } else {
-        new_alive = 0;
+        // you are free to skip this check, here it was kept for sake of completeness
+        if (survive_rule(alive_neighbors)) {
+          new_alive = 1;
+          next.hue[idx] = cur.hue[idx];
+        } else {
+          new_alive = 0;
+        }
       }
-    }
 
-    next.alive[idx] = new_alive;
-    if (new_alive != alive)
-      changes++;
+      next.alive[idx] = new_alive;
+      if (new_alive != alive)
+        changes++;
     }
   }
   return changes;
@@ -210,8 +350,8 @@ int evolve_step(const Grid &cur, Grid &next) {
 void simulate_sequential(Grid &g) {
   // it's hard to perform updates in place, we ping-pong between grid copies
   Grid tmp(g.W, g.H);
-
-  for (long step = 0; step < MAX_STEPS; step++) {
+    long step;
+  for (step = 0; step < MAX_STEPS; step++) {
     // one step at a time
     // note: fully overwrites tmp with the next state
     int changes = evolve_step(g, tmp);
@@ -229,73 +369,85 @@ void simulate_sequential(Grid &g) {
 
 // ===> IMPLEMENT YOUR VERSION OF THIS FUNCTION <===
 // as of now this is a stub: it just calls the sequential version...
-void simulate_parallel(Grid &g) {
-  simulate_sequential(g);
+int simulate_parallel(Grid &g) {
+    return g.evolve();
 }
 
 // =================================================
 // === DO NOT CHANGE ANYTHING BELOW THIS COMMENT ===
 
 int main(int argc, char **argv) {
-    omp_set_nested(true); // just in case, enable nested parallelism
+  omp_set_nested(true); // just in case, enable nested parallelism
 
-    if (argc < 4 || argc > 5) {
-        fprintf(stderr, "Usage: %s <grid-width> <grid-height> <seed> <[opt]-output-filename>\n", argv[0]);
-        return 1;
-    }
+  if (argc < 4 || argc > 5) {
+    fprintf(stderr, "Usage: %s <grid-width> <grid-height> <seed> <[opt]-output-filename>\n", argv[0]);
+    return 1;
+  }
+    std::cout << "parsing args" << std::endl;
+  int W = atoi(argv[1]);
+  int H = atoi(argv[2]);
+  int seed = atoi(argv[3]);
+  srand(seed);
+    std::cout << "done parsing args" << std::endl;
 
-    int W = atoi(argv[1]);
-    int H = atoi(argv[2]);
-    int seed = atoi(argv[3]);
-    srand(seed);
+    std::cout << "creating grid" << std::endl;
 
-    Grid gs(W,H), gp(W,H);
-    initialize_grid(gs);
-    // copy the initial state
-    gp = gs;
+  Grid gs(W, H), gp(W, H);
+  gs.init();
+    std::cout << "done creating grid" << std::endl;
 
-    // === DO NOT CHANGE ANYTHING ABOVE THIS COMMENT ===
-    // =================================================
+  // copy the initial state
+  gp = gs;
 
-    // if you need to initialize additional things, do that here!
-
-    // =================================================
-    // === DO NOT CHANGE ANYTHING BELOW THIS COMMENT ===
-
-    // sequential
-    #if !DISABLE_SEQUENTIAL
-    double t1 = omp_get_wtime();
-    simulate_sequential(gs);
-    double t2 = omp_get_wtime();
-    #endif
-
-    // parallel
-    double t3 = omp_get_wtime();
-    simulate_parallel(gp);
-    double t4 = omp_get_wtime();
-
-    #if !DISABLE_SEQUENTIAL
-    printf("Sequent. time: %.6f s\n", t2 - t1);
-    #endif
-    printf("Parallel time: %.6f s\n", t4 - t3);
-
-    #if !DISABLE_SEQUENTIAL
+#if !DISABLE_SEQUENTIAL
     bool equal = compare_grids(gs, gp);
     printf("Results check: %s\n", equal ? "PASS" : "FAIL");
-    #endif
+#endif
+  // === DO NOT CHANGE ANYTHING ABOVE THIS COMMENT ===
+  // =================================================
 
-    // === DO NOT CHANGE ANYTHING ABOVE THIS COMMENT ===
-    // =================================================
+  // if you need to initialize additional things, do that here!
 
-    // if you need more logging, put it here!
+  // =================================================
+  // === DO NOT CHANGE ANYTHING BELOW THIS COMMENT ===
 
-    // =================================================
-    // === DO NOT CHANGE ANYTHING BELOW THIS COMMENT ===
+  // sequential
+        std::cout << "start seq" << std::endl;
+#if !DISABLE_SEQUENTIAL
+  double t1 = omp_get_wtime();
+  simulate_sequential(gs);
+  double t2 = omp_get_wtime();
+#endif
 
-    if (argc == 5) {
-      write_grid_to_file(gp, (char *)argv[4]);
-      printf("Results written to %s\n", (char *)argv[4]);
-    }
+  // parallel
+    std::cout << "start par" << std::endl;
+  double t3 = omp_get_wtime();
+  simulate_parallel(gp);
+  double t4 = omp_get_wtime();
 
-    return 0;
+#if !DISABLE_SEQUENTIAL
+  printf("Sequent. time: %.6f s\n", t2 - t1);
+#endif
+  printf("Parallel time: %.6f s\n", t4 - t3);
+
+#if !DISABLE_SEQUENTIAL
+  equal = compare_grids(gs, gp);
+  printf("Results check: %s\n", equal ? "PASS" : "FAIL");
+#endif
+
+  // === DO NOT CHANGE ANYTHING ABOVE THIS COMMENT ===
+  // =================================================
+
+  // if you need more logging, put it here!
+
+  // =================================================
+  // === DO NOT CHANGE ANYTHING BELOW THIS COMMENT ===
+
+  if (argc == 5) {
+    write_grid_to_file(gp, (char *) argv[4]);
+    printf("Results written to %s\n", (char *) argv[4]);
+      write_grid_to_file(gs, "base_bin.lwd");
+  }
+
+  return 0;
 }

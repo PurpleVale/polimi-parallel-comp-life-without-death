@@ -32,4 +32,5 @@ def render(filename):
     plt.show()
 
 
-render("../output/base_out.lwd")
+render("../output/life_bin.lwd")
+render("../output/base_bin.lwd")
