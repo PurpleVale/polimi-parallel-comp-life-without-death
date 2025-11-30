@@ -18,9 +18,3 @@ target_link_libraries(Base PUBLIC OpenMP::OpenMP_CXX)
 
 add_executable(LwD src/our_implementation.cpp)
 target_link_libraries(LwD PUBLIC OpenMP::OpenMP_CXX)
-
-add_executable(LwDGiulio src/Parallel_giulio.cpp)
-target_link_libraries(LwDGiulio PUBLIC OpenMP::OpenMP_CXX)
-
-add_executable(LwDAlessia src/parallel_alessia.cpp)
-target_link_libraries(LwDAlessia PUBLIC OpenMP::OpenMP_CXX)

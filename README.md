@@ -11,6 +11,11 @@ Life without Death challenge for Parallel Computing Course a.y. 25/26 Polimi
 | Alessia     | Rigoni     | 10859832    |
 | Giulio Enzo | Donninelli | 10823453    |
 
+# Code Profiling
+
+The profiling of the code was done with a custom script `compile_and_log.sh`
+The results can be found here: [Profiling on GoogleSheet](https://docs.google.com/spreadsheets/d/1q1YAxiXo2tiVPbItVfo0__0ttwRlqZgJAdyFnSGF6EM/edit?usp=sharing)
+
 # Project Description
 
 <img src="https://upload.wikimedia.org/wikipedia/commons/2/23/Without_death.gif" align="right" width="200px">

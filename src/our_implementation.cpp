@@ -394,6 +394,8 @@ int main(int argc, char **argv) {
   // === DO NOT CHANGE ANYTHING BELOW THIS COMMENT ===
 
   // sequential
+    std::cout << "start seq" << std::endl;
+
 #if !DISABLE_SEQUENTIAL
   double t1 = omp_get_wtime();
   simulate_sequential(gs);
@@ -401,7 +403,7 @@ int main(int argc, char **argv) {
 #endif
 
   // parallel
-    // std::cout << "start par" << std::endl;
+    std::cout << "start par" << std::endl;
   double t3 = omp_get_wtime();
   simulate_parallel(gp);
   double t4 = omp_get_wtime();
