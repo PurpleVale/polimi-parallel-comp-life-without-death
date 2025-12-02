@@ -20,17 +20,24 @@ def hue_to_rgb(hue):
     hsv[..., 2] = 1.0 # full value
     return mcolors.hsv_to_rgb(hsv)
 
-def render(filename):
-    W, H, alive, hue = load_grid_binary(filename)
+def render(filename1, filename2):
+    W, H, alive, hue = load_grid_binary(filename1)
     rgb = hue_to_rgb(hue)
     rgb[alive == 0] = 0.0
 
     plt.figure(figsize=(10,10))
+    plt.subplot(1, 2, 1)
     plt.imshow(rgb, interpolation = "nearest")
-    plt.title(f"{filename} ({W} × {H})")
+    plt.title(f"{filename1} ({W} × {H})")
+    plt.axis("off")
+    plt.subplot(1, 2, 2)
+    W, H, alive, hue = load_grid_binary(filename2)
+    rgb = hue_to_rgb(hue)
+    rgb[alive == 0] = 0.0
+    plt.imshow(rgb, interpolation = "nearest")
+    plt.title(f"{filename2} ({W} × {H})")
     plt.axis("off")
     plt.show()
 
 
-render("../output/life_bin.lwd")
-render("../output/base_bin.lwd")
+render("../output/life_bin.lwd", "../output/base.lwd")
