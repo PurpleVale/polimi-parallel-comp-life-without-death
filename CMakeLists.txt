@@ -3,9 +3,10 @@ set(CMAKE_CXX_STANDARD 20)
 
 project(Life_Without_Death)
 
-find_package(OpenMP)
+find_package(OpenMP 4.5)
 if(OpenMP_CXX_FOUND)
-    message(STATUS "OpenMP Correctly Initialized")
+    message(STATUS "OpenMP Correctly Initialized version: ")
+    message(STATUS ${OpenMP_VERSION})
 endif()
 
 set(DIR ${CMAKE_CURRENT_SOURCE_DIR})
